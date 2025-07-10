@@ -60,7 +60,7 @@ async def test_pipeline(payload: SimulationRequest):
 
     try:
         async with websockets.connect(
-            settings.ROOT_URI + "simulate/ws/test"
+            settings.ROOT_URI + "/simulate/ws/test"
         ) as websocket:
             await websocket.send(json.dumps(message))
             response = await websocket.recv()

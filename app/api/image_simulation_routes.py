@@ -38,7 +38,7 @@ async def simulate(websocket: WebSocket):
 
             # Forward to latents to relay
             async with websockets.connect(
-                settings.RELAY_URI + "/ws/reconstruct-image-from-waveform-latent"
+                settings.ROOT_URI + "/ws/reconstruct-image-from-waveform-latent"
             ) as relay_ws:
                 await relay_ws.send(json.dumps(payload))
 
@@ -67,14 +67,14 @@ async def simulate(websocket: WebSocket):
             if request.get("type") == "test":
                 logger.info(f"[ImageSimulation] Received test payload: {request}")
                 logger.info(
-                    f"settings.RELAY_URI + /reconstruct/ws/test: {settings.RELAY_URI}"
+                    f"settings.ROOT_URI + /reconstruct/ws/test: {settings.ROOT_URI}"
                     + "/reconstruct/ws/test"
                 )
                 logger.info(f"json.dumps(request): {json.dumps(request)}")
                 # Forward to the relay WebSocket
                 try:
                     async with websockets.connect(
-                        settings.RELAY_URI + "/reconstruct/ws/test"
+                        settings.ROOT_URI + "/reconstruct/ws/test"
                     ) as relay_ws:
                         await relay_ws.send(json.dumps(request))
                         relay_response = await relay_ws.recv()
@@ -107,8 +107,14 @@ async def simulate(websocket: WebSocket):
 @router.get("/ws-info", tags=["Simulate"])
 async def websocket_info():
     return {
-        "endpoint": "/simulate/ws/simulate-image-to-waveform-latent",
-        "full_url": "ws://localhost:8000/image-simulation-to-synthetic-waveform-api/simulate/ws/simulate-image-to-waveform-latent",
+        "endpoint": {
+            "/simulate/ws/simulate-image-to-waveform-latent",
+            "/simulate/ws/test",
+        },
+        "full_url": {
+            "ws://***.ngrok-free.app/thought-to-image-simulation-api/simulate/ws/simulate-image-to-waveform-latent",
+            "ws://***.ngrok-free.app/thought-to-image-simulation-api/simulate/ws/test",
+        },
         "protocol": "WebSocket",
         "description": "Real-time simulation of image → synthetic waveform → waveform latent.",
         "input_format": {
