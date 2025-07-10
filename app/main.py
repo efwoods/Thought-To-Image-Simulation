@@ -106,151 +106,9 @@ from redis.asyncio import Redis
 # API Routes
 from api.relay_routes import router as relay_router
 from api.image_simulation_routes import router as images_simulation_router
+from api.webcam_to_websocket_routes import router as webcam_to_websocket_router
 
 from data.dataset import ImageWaveformDataset
-
-# -----------------------------
-# Load .env and assert
-# -----------------------------
-load_dotenv()
-WS_URI = os.getenv("WS_URI")
-assert WS_URI is not None, "WS_URI not loaded from .env"
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-GITHUB_GIST_ID = os.getenv("GITHUB_GIST_ID")  # Your gist ID
-GIST_API_URL = f"https://api.github.com/gists/{GITHUB_GIST_ID}"
-
-USE_PERCEPTUAL_LOSS = False
-RESIZE_DIM = (224, 224) if USE_PERCEPTUAL_LOSS else (64, 64)
-
-{
-    "type": "test",
-    "timestamp": "2025-06-30T01:55:00Z",
-    "origin": "webcam-to-websocket-simulation",
-}
-
-# -----------------------------
-# Dataset paths
-# -----------------------------
-waveform_dict_path = "data/collected_stimulus_waveforms.pkl"
-image_dict_path = "data/image_paths_dict.pkl"
-test_metadata_path = "data/test_dataset_metadata.pkl"
-
-# -----------------------------
-# Transform
-# -----------------------------
-image_resize_transform = transforms.Compose(
-    [
-        transforms.Resize(RESIZE_DIM),
-    ]
-)
-
-
-# -----------------------------
-# Input Model
-# -----------------------------
-class SimulationRequest(BaseModel):
-    user_id: str
-    avatar_id: str
-    enable_thought_to_image: bool = False
-
-
-# -----------------------------
-# Load Dataset
-# -----------------------------
-with open(waveform_dict_path, "rb") as f:
-    waveform_dict = pickle.load(f)
-with open(image_dict_path, "rb") as f:
-    image_paths = pickle.load(f)
-with open(test_metadata_path, "rb") as f:
-    test_meta = pickle.load(f)
-test_indices = test_meta["indices"]
-dataset = ImageWaveformDataset(waveform_dict, image_paths, image_resize_transform)
-
-
-# -----------------------------
-# Convert PIL Image → Base64
-# -----------------------------
-def pil_image_to_base64(image: Image.Image) -> str:
-    buffer = BytesIO()
-    image.save(buffer, format="PNG")
-    base64_img = base64.b64encode(buffer.getvalue()).decode("utf-8")
-    return f"data:image/png;base64,{base64_img}"
-
-
-# -----------------------------
-# WebSocket Sender
-# -----------------------------
-async def send_image(session_id: str, image: Image.Image):
-    image_base64 = pil_image_to_base64(image)
-    payload = {
-        "type": "simulate",
-        "session_id": session_id,
-        "image_base64": image_base64,
-    }
-    try:
-        async with websockets.connect(app.state.ws_url_test) as websocket:
-            await websocket.send(json.dumps(payload))
-            response = await websocket.recv()
-            print(f"[{session_id}] Response: {response}")
-            return response
-    except Exception as e:
-        print(f"[ERROR] {session_id}: {e}")
-        return json.dumps({"error": str(e)})
-
-
-# -----------------------------
-# Test Image Simulation
-# -----------------------------
-async def simulate_all_images(session_id: str, index: int):
-    idx = test_indices[index % len(test_indices)]
-    pil_image, _ = dataset[idx]
-    logger.info(f"type(image_tensor):{type(pil_image)}")
-    response = await send_image(session_id, pil_image)
-    return response
-
-
-# -----------------------------
-# Extract NGROK URL
-# -----------------------------
-def extract_ngrok_url(text: str) -> str:
-    """
-    Extract the ngrok URL from raw gist text using regex
-    """
-    match = re.search(r"https://[\w\-]+\.ngrok-free\.app", text)
-    if match:
-        return match.group(0).replace("https", "wss")
-    raise ValueError("No ngrok URL found in gist")
-
-
-# -----------------------------
-# Fetch NGROK URL
-# -----------------------------
-def fetch_ngrok_url():
-    global ngrok_url
-
-    if not GITHUB_TOKEN:
-        print("GitHub token is missing in environment variable `GITHUB_TOKEN`.")
-        return
-
-    headers = {
-        "Authorization": f"token {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github+json",
-    }
-
-    try:
-        response = requests.get(GIST_API_URL, headers=headers, timeout=10)
-        response.raise_for_status()
-        gist_data = response.json()
-
-        # Assuming there's only one file in the Gist, extract its content
-        file_content = next(iter(gist_data["files"].values()))["content"]
-
-        # Extract ngrok URL
-        ngrok_url = extract_ngrok_url(file_content)
-        print(f"[Startup] Ngrok URL loaded: {ngrok_url}")
-
-    except Exception as e:
-        print(f"[Startup] Failed to fetch or parse Gist: {e}")
 
 
 # -----------------------------
@@ -260,10 +118,9 @@ def fetch_ngrok_url():
 async def lifespan(app: FastAPI):
     # Webcam-to-Websocket
     print("[Startup] FastAPI simulation sender is live")
-    app.state.simulation_index = 0
+
     fetch_ngrok_url()
-    logger.info(f"ngrok_url set: {ngrok_url}")
-    app.state.ws_url = ngrok_url + WS_URI
+    logger.info(f"ngrok_url set: {settings.NGROK_URL}")
     # Relay-WS-Thought-to-image
     # Startup: initialize Whisper model
     load_dotenv()
@@ -297,76 +154,11 @@ app.add_middleware(
 
 
 # Include routers
-# app.include_router(router, prefix="/simulate", tags=["Simulate"])
-
-# Include routers
 app.include_router(relay_router, prefix="/reconstruct", tags=["Reconstruct"])
 app.include_router(images_simulation_router, prefix="/simulate", tags=["Simulate"])
-
-
-@app.post("/test/full-pipeline")
-async def test_pipeline(payload: SimulationRequest):
-    timestamp = datetime.datetime.utcnow().isoformat() + "Z"
-    message = {
-        "type": "test",
-        "timestamp": timestamp,
-        "origin": "webcam-to-websocket-simulation",
-        "payload": payload.json(),
-    }
-    logger.info(
-        f"app.state.ws_url + simulate/ws/test: {app.state.ws_url}" + "simulate/ws/test"
-    )
-    try:
-        async with websockets.connect(
-            app.state.ws_url + "simulate/ws/test"
-        ) as websocket:
-            await websocket.send(json.dumps(message))
-            response = await websocket.recv()
-            print(f"[{timestamp}] Response: {response}")
-            return response
-    except Exception as e:
-        print(f"[ERROR] {timestamp}: {e}")
-        return json.dumps({"error": str(e)})
-
-
-async def send_image(session_id: str, image: Image.Image):
-    image_base64 = pil_image_to_base64(image)
-    payload = {
-        "type": "simulate",
-        "session_id": session_id,
-        "image_base64": image_base64,
-    }
-    try:
-        async with websockets.connect(
-            app.state.ws_url + "simulate/ws/simulate-image-to-waveform-latent"
-        ) as websocket:
-            await websocket.send(json.dumps(payload))
-            response = await websocket.recv()
-            print(f"[{session_id}] Response: {response}")
-            return response
-    except Exception as e:
-        print(f"[ERROR] {session_id}: {e}")
-        return json.dumps({"error": str(e)})
-
-
-@app.post("/simulate-test-images")
-async def simulate_test_images(payload: SimulationRequest):
-    index = app.state.simulation_index
-    response = await simulate_all_images(payload.session_id, index)
-    app.state.simulation_index += 1
-    return {"response": response}
-
-
-@app.post("/simulate-webcam-stream")
-async def simulate_test_images(payload: SimulationRequest):
-    # Simulate Webcam Images
-    return {"response": "success"}
-
-
-@app.post("/simulate-test-waveform")
-async def simulate_test_images(payload: SimulationRequest):
-    # Simulate Test Waveform Logic
-    return {"response": "success"}
+app.include_router(
+    webcam_to_websocket_router, prefix="/initialize", tags=["Initialize"]
+)
 
 
 @app.get("/")

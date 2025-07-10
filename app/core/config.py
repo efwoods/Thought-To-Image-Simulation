@@ -4,6 +4,7 @@ from typing import Optional
 
 
 class Settings(BaseSettings):
+
     # Redis (Docker-managed)
     REDIS_HOST: str
     REDIS_PORT: int
@@ -19,33 +20,16 @@ class Settings(BaseSettings):
     LATENT_DIM: int
 
     # Image -> Image_Latent -> Waveform -> Waveform_Latent
+    STIMULUS_IMAGES_DIR: str
+    USE_PERCEPTUAL_LOSS: bool
     NORMALIZATION_CONFIG: str
     IMAGE_ENCODER_PATH: str
     WAVEFORM_ENCODER_PATH: str
     WAVEFORM_DECODER_PATH: str
 
-    # GITHUB NGROK CONFIG
-    GITHUB_TOKEN: str
-    GITHUB_GIST_ID: str
-
-    NGROK_URL: Optional[str] = None
-
-    class Config:
-        env_file = ".env"
-
-
-settings = Settings()
-
-
-class Settings(BaseSettings):
-
-    # Models
-    NORMALIZATION_CONFIG: str
-    IMAGE_ENCODER_PATH: str
-    WAVEFORM_ENCODER_PATH: str
-    WAVEFORM_DECODER_PATH: str
-    RESIZED_IMAGE_SIZE: int
-    LATENT_DIM: int
+    WAVEFORM_DICT_PATH: str
+    IMAGE_DICT_PATH: str
+    TEST_METADATA_PATH: str
 
     # GITHUB NGROK CONFIG
     GITHUB_TOKEN: str
@@ -58,11 +42,16 @@ class Settings(BaseSettings):
         return f"https://api.github.com/gists/{self.GITHUB_GIST_ID}"
 
     @property
-    def RELAY_URI(self) -> str:
-        return self.NGROK_URL + "/relay-waveform-latent-to-image-reconstruction-api"
+    def ROOT_URI(self) -> str:
+        return self.NGROK_URL + "/thought-to-image-simulation-api"
+
+    @property
+    def RESIZE_DIM(self) -> tuple:
+        return (224, 224) if self.USE_PERCEPTUAL_LOSS else (64, 64)
 
     class Config:
         env_file = ".env"
+        extra = "allow"
 
 
 settings = Settings()
