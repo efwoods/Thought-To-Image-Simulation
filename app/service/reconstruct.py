@@ -19,7 +19,11 @@ def preprocess_image_from_websocket(message):
         request["payload"], dtype=torch.float32, device=settings.DEVICE
     ).unsqueeze(0)
 
-    return waveform_latent, request
+    synthetic_waveform = request["synthetic_waveform"]
+    img_data = request["img_data"]
+    image_bytes = base64.b64decode(img_data.split(",")[1])
+
+    return waveform_latent, request, synthetic_waveform, image_bytes
 
 
 @torch.no_grad()

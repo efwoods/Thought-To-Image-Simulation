@@ -39,7 +39,7 @@ def preprocess_image_from_websocket(message):
         .unsqueeze(0)
         .to(settings.DEVICE)
     )
-    return image_tensor, request
+    return image_tensor, request, img_data
 
 
 @torch.no_grad()
@@ -54,4 +54,4 @@ def transform_image_to_waveform_latents(image_tensor):
 
     waveform_latent = waveform_encoder(synthetic_waveform)
     # waveform_latent is (batch_size = number_of_images, 128)
-    return waveform_latent, skip_connections
+    return waveform_latent, skip_connections, synthetic_waveform

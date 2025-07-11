@@ -26,14 +26,16 @@ async def simulate(websocket: WebSocket):
 
     try:
         async for message in websocket:
-            image_tensor, request = preprocess_image_from_websocket(message)
-            waveform_latent, skip_connections = transform_image_to_waveform_latents(
-                image_tensor
+            image_tensor, request, img_data = preprocess_image_from_websocket(message)
+            waveform_latent, skip_connections, synthetic_waveform = (
+                transform_image_to_waveform_latents(image_tensor)
             )
             payload = {
                 "type": "waveform_latent",  # (batch_size = number_of_images, 128)
                 "session_id": request.get("session_id", "anonymous"),
                 "payload": waveform_latent.squeeze().cpu().tolist(),
+                "synthetic_waveform": synthetic_waveform,
+                "img_data": img_data,
             }
 
             # Forward to latents to relay
