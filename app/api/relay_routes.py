@@ -34,8 +34,11 @@ async def simulate(websocket: WebSocket):
 
     await websocket.accept()
     try:
-        async for message in websocket:
-            waveform_latent, request = preprocess_image_from_websocket(message)
+        while True:
+            message = await websocket.receive_text()
+            waveform_latent, request, synthetic_waveform = (
+                preprocess_image_from_websocket(message)
+            )
 
             reconstructed_image = reconstruct_image_from_waveform_latents(
                 waveform_latent
@@ -55,7 +58,6 @@ async def simulate(websocket: WebSocket):
             )
 
             # forward to frontend if available (place in Redis Cache)
-            # settings.THOUGHT_TO_IMAGE_REDIS_KEY
             redis_key = f"reconstructed:{settings.THOUGHT_TO_IMAGE_REDIS_KEY}"
             redis_value = json.dumps(
                 {
@@ -64,21 +66,14 @@ async def simulate(websocket: WebSocket):
                     "image_base64": f"data:image/png;base64,{image_base64}",
                 }
             )
-            redis_client.set(
-                redis_key,
-                redis_value,
-                ex=600,
-            )
+            await redis_client.set(redis_key, redis_value, ex=600)
             metrics.visual_thoughts_rendered.inc()
 
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected.")
-    except Exception as e:
+    except Exception:
         logger.exception("WebSocket error in image reconstruction:")
         metrics.websocket_errors.inc()
-
-
-router = APIRouter()
 
 
 @router.websocket("/ws/test")
@@ -147,36 +142,53 @@ async def simulate(websocket: WebSocket):
 @router.get("/ws-info", tags=["Reconstruct"])
 async def reconstructed_image_info():
     """
-    Returns metadata and schema for the /ws/reconstruct-image-from-waveform-latent WebSocket endpoint.
+    Provides metadata and expected schema for WebSocket routes used in image reconstruction.
     """
     return {
-        "endpoint": "/ws/reconstruct-image-from-waveform-latent",
-        "full_url": "ws://localhost:8000/relay-waveform-latent-to-image-reconstruction-api/ws/reconstruct-image-from-waveform-latent",
-        "protocol": "WebSocket",
-        "description": (
-            "Reconstructs a full-resolution image from waveform_latent and skip_connections. "
-            "Accepts serialized latents over WebSocket and sends back a base64-encoded image. "
-            "Image is also stored in Redis cache using the session ID or predetermined key."
-        ),
-        "input_format": {
-            "type": "waveform_latent",
-            "session_id": "string (optional, used to identify cached image)",
-            "payload": "[float list representing waveform latent]",
-            "skip_connections": "serialized PyTorch skip connection object (binary, base64-encoded or torch.save buffer)",
-        },
-        "output_format": {
-            "status": "success",
-            "type": "reconstructed_image",
-            "session_id": "copied from input or 'anonymous'",
-            "image_base64": "data:image/png;base64,...",
-        },
-        "redis_cache": {
-            "key_pattern": "reconstructed:{session_id}",
-            "value_format": {
-                "type": "reconstructed_image",
-                "session_id": "{session_id}",
-                "image_base64": "data:image/png;base64,...",
+        "websocket_routes": [
+            {
+                "route": "/ws/reconstruct-image-from-waveform-latent",
+                "description": "Accepts a latent waveform representation and returns a reconstructed image via base64.",
+                "message_format": {
+                    "waveform_latent": "<base64 or numerical array>",
+                    "session_id": "<optional string identifier>",
+                    "synthetic_waveform": "<optional boolean>",
+                },
+                "response_format": {
+                    "status": "success",
+                    "type": "reconstructed_image",
+                    "session_id": "<string>",
+                    "image_base64": "data:image/png;base64,<image>",
+                },
+                "backend_flow": {
+                    "storage": "Stores image in Redis using key: reconstructed:<settings.THOUGHT_TO_IMAGE_REDIS_KEY>",
+                    "expiration": "600 seconds",
+                    "metrics_updated": ["visual_thoughts_rendered"],
+                },
             },
-            "expiration_seconds": 600,
+            {
+                "route": "/ws/test",
+                "description": "Sends a test payload and waits for a relay (or frontend) to write the final result back into Redis.",
+                "message_format": {
+                    "type": "test",
+                    "session_id": "<string>",
+                    "example_payload": "<any additional fields>",
+                },
+                "response_format": {
+                    "status": "timeout or forwarded",
+                    "redis_key": "<Redis key used>",
+                    "relay_response": "<payload returned from Redis>",
+                },
+                "relay_flow": {
+                    "wait_time": "30 seconds max (60 attempts x 0.5s)",
+                    "storage": "Checks Redis key: reconstructed:<settings.THOUGHT_TO_IMAGE_REDIS_KEY>",
+                    "metrics_updated": ["visual_thoughts_rendered"],
+                },
+            },
+        ],
+        "dependencies": {
+            "redis": "Redis async client (`redis.asyncio.Redis`, requires `redis>=4.2.0`)",
+            "image_processing": "torchvision.transforms, PIL.Image",
+            "base64_encoding": "Used to send image preview in base64 format",
         },
     }

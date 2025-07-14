@@ -75,7 +75,7 @@ async def test_pipeline(payload: SimulationRequest):
 @router.post("/enable-thought-to-image")
 async def process_thought_to_image(payload: SimulationRequest):
     """
-    Every time this endpoitn is called, sample images will be synthesized into waveforms and reconstructed into images.
+    Every time this endpoint is called, sample images will be synthesized into waveforms and reconstructed into images.
     The return is the original image, the synthesized neural waveform, and the reconstructed image.
     """
     # Simulate Test Images
@@ -85,19 +85,27 @@ async def process_thought_to_image(payload: SimulationRequest):
         "type": "test",
         "timestamp": timestamp,
         "origin": "webcam-to-websocket-simulation",
-        "simulation_image_index": process_thought_to_image_index,
+        "process_thought_to_image_index": process_thought_to_image_index,
         "payload": payload.json(),
     }
     logger.info(
-        f"settings.ROOT_URI + /simulate/ws/test: {settings.ROOT_URI}"
-        + "/simulate/ws/test"
+        f"settings.ROOT_URI + /simulate/ws/simulate-image-to-waveform-latent: {settings.ROOT_URI}"
+        + "/simulate/ws/simulate-image-to-waveform-latent"
     )
-    logger.info(f"simulation_image_index: {process_thought_to_image_index}")
+    logger.info(f"process_thought_to_image_index: {process_thought_to_image_index}")
 
-    return {
-        "response": "success",
-        "description": "Every time this endpoitn is called, sample images will be synthesized into waveforms and reconstructed into images. The return is the original image, the synthesized neural waveform, and the reconstructed image",
-    }
+    try:
+        async with websockets.connect(
+            settings.ROOT_URI + "/simulate/ws/simulate-image-to-waveform-latent"
+        ) as websocket:
+            await websocket.send(json.dumps(message))
+            response = await websocket.recv()
+            logger.info(f"[{timestamp}] Response: {response}")
+            process_thought_to_image_index += 1
+            return response
+    except Exception as e:
+        logger.error(f"[ERROR] {timestamp}: {e}")
+        return json.dumps({"error": str(e)})
 
 
 @router.post("/simulate-test-images")

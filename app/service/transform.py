@@ -6,6 +6,7 @@ from io import BytesIO
 from PIL import Image
 from service.image_encoder_loader import load_models, get_image_resize_transform
 from core.config import settings
+from core.logging import logger
 
 image_encoder, waveform_decoder, waveform_encoder = load_models()
 image_resize_transform = get_image_resize_transform()
@@ -42,9 +43,21 @@ def preprocess_image_from_websocket(message):
     return image_tensor, request, img_data
 
 
+def serialize_skip_connections(skip_connections):
+    """This will serialize the skip connections into a transmissible format.
+
+    Args:
+        skip_connections (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
+
+
 @torch.no_grad()
 def transform_image_to_waveform_latents(image_tensor):
     image_latent, skip_connections = image_encoder(image_tensor)
+    logger.info(f"type(skip_connections): {type(skip_connections)}")
     synthetic_waveform = waveform_decoder(image_latent)
 
     # Normalize the waveform using the global means and std
