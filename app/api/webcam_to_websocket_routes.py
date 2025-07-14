@@ -35,6 +35,9 @@ from service.webcam_to_websocket_service import (
     send_image,
     simulate_all_images,
 )
+import pickle
+
+IMAGE_PATHS_FLAT_LIST = "/data/image_paths_dict_flat_list.pkl"
 
 simulation_image_index_test_full_pipeline = 0
 process_thought_to_image_index = 0
@@ -81,6 +84,9 @@ async def process_thought_to_image(payload: SimulationRequest):
     # Simulate Test Images
     global process_thought_to_image_index
     timestamp = datetime.datetime.utcnow().isoformat() + "Z"
+    with open(IMAGE_PATHS_FLAT_LIST, "rb") as f:
+        sample_stimulus_image_path_list = pickle.load(f)
+
     message = {
         "type": "test",
         "timestamp": timestamp,
