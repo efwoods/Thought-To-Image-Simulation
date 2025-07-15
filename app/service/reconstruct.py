@@ -6,6 +6,7 @@ from io import BytesIO
 from PIL import Image
 from service.decoder_loader import load_models, get_image_resize_transform
 from core.config import settings
+import zlib
 
 image_decoder = load_models()
 image_resize_transform = get_image_resize_transform()
@@ -27,6 +28,15 @@ def preprocess_image_from_websocket(message):
 
 
 @torch.no_grad()
-def reconstruct_image_from_waveform_latents(waveform_latent):
-    reconstructed_image = image_decoder(waveform_latent)
+def reconstruct_image_from_waveform_latents(waveform_latent, skip_connections=None):
+    reconstructed_image = image_decoder(
+        waveform_latent, skip_connections=skip_connections
+    )
     return reconstructed_image
+
+
+def decode_and_decompress_tensor(encoded_str: str) -> torch.Tensor:
+    compressed = base64.b64decode(encoded_str)
+    json_bytes = zlib.decompress(compressed)
+    tensor_data = json.loads(json_bytes.decode("utf-8"))
+    return torch.tensor(tensor_data, dtype=torch.float32, device=settings.DEVICE)

@@ -1,4 +1,4 @@
-# api/routes.py
+# api/image_simulation_routes.py
 
 from fastapi import APIRouter
 from fastapi import WebSocket, WebSocketDisconnect
@@ -15,7 +15,10 @@ from core.config import settings
 from service.transform import (
     preprocess_image_from_websocket,
     transform_image_to_waveform_latents,
+    compress_skip_connections,
+    compress_and_encode_tensor,
 )
+import datetime
 
 router = APIRouter()
 
@@ -32,46 +35,55 @@ async def simulate(websocket: WebSocket):
         while True:
             message = await websocket.receive_text()
 
-            image_tensor, request, img_data = preprocess_image_from_websocket(message)
+            image_tensor, request, image_base64, request_metadata = (
+                preprocess_image_from_websocket(message)
+            )
+
             waveform_latent, skip_connections, synthetic_waveform = (
                 transform_image_to_waveform_latents(image_tensor)
             )
 
-            logger.info("POST SKIP_CONNECTION CREATION")
-            if isinstance(skip_connections, list):
-                for idx, sc in enumerate(skip_connections):
-                    if isinstance(sc, torch.Tensor):
-                        logger.info(
-                            f"skip_connections[{idx}] - dtype: {sc.dtype}, shape: {sc.shape}, device: {sc.device}"
-                        )
-                    else:
-                        logger.info(f"skip_connections[{idx}] - type: {type(sc)}")
-            elif isinstance(skip_connections, torch.Tensor):
-                logger.info(
-                    f"skip_connections - dtype: {skip_connections.dtype}, shape: {skip_connections.shape}, device: {skip_connections.device}"
-                )
-            else:
-                logger.info(
-                    f"skip_connections - unknown type: {type(skip_connections)}"
-                )
+            encoded_compressed_skip_connections = compress_skip_connections(
+                skip_connections
+            )
 
-            payload = {
-                "type": "waveform_latent",
-                "session_id": request.get("session_id", "anonymous"),
-                "payload": waveform_latent.squeeze().cpu().tolist(),
-                "synthetic_waveform": synthetic_waveform,
-                "img_data": img_data,
-                "skip_connections": None,  # serialize if needed later
+            logger.info("POST SKIP_CONNECTION CREATION")
+
+            base64_str_compressed_synthetic_waveform = compress_and_encode_tensor(
+                synthetic_waveform
+            )
+            compressed_encoded_waveform_latent_base64 = compress_and_encode_tensor(
+                waveform_latent
+            )
+
+            timestamp = datetime.datetime.utcnow().isoformat() + "Z"
+            metadata = {
+                **request_metadata,
+                "type": "test",
+                "timestamp": timestamp,
+                "origin": "simulate-image-to-waveform-latent",
             }
 
+            message = {
+                "payload": {
+                    "waveform_latent": compressed_encoded_waveform_latent_base64,
+                    "synthetic_waveform": base64_str_compressed_synthetic_waveform,
+                    "image_base64": image_base64,
+                    "skip_connections": encoded_compressed_skip_connections,
+                },
+                "metadata": metadata,
+            }
+
+            # Forward pipeline
             async with websockets.connect(
                 settings.ROOT_URI
                 + "/reconstruct/ws/reconstruct-image-from-waveform-latent"
             ) as relay_ws:
-                await relay_ws.send(json.dumps(payload))
+                await relay_ws.send(json.dumps(message))
 
+            # Respond back
             await websocket.send_json(
-                {"status": "success", "latents": payload["payload"]}
+                {"status": "success", "metadata": metadata},
             )
             metrics.visual_thoughts_simulated.inc()
 

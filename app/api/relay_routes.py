@@ -1,4 +1,4 @@
-# api/routes.py
+# api/relay_routes.py
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from core.monitoring import metrics
@@ -23,57 +23,71 @@ from redis.asyncio import Redis  # requires `redis>=4.2.0`
 from service.reconstruct import (
     preprocess_image_from_websocket,
     reconstruct_image_from_waveform_latents,
+    decode_and_decompress_tensor,
 )
 
 router = APIRouter()
 
 
 @router.websocket("/ws/reconstruct-image-from-waveform-latent")
-async def simulate(websocket: WebSocket):
-    redis_client = websocket.app.state.redis
-
+async def reconstruct(websocket: WebSocket):
     await websocket.accept()
+    logger.info("Image reconstruction WebSocket connected.")
+
     try:
         while True:
             message = await websocket.receive_text()
-            waveform_latent, request, synthetic_waveform = (
-                preprocess_image_from_websocket(message)
+            request = json.loads(message)
+            payload = request["payload"]
+
+            waveform_latent = decode_and_decompress_tensor(payload["waveform_latent"])
+            skip_connections = decode_and_decompress_tensor(payload["skip_connections"])
+
+            # Optional: if skip_connections is a list of tensors (like from UNet), handle as list
+            if (
+                isinstance(skip_connections, torch.Tensor)
+                and skip_connections.ndim == 3
+            ):
+                skip_connections = [
+                    t.unsqueeze(0).to(settings.DEVICE) for t in skip_connections
+                ]
+
+            # Reconstruct the image using decoder
+            with torch.no_grad():
+                reconstructed_image_tensor = image_decoder(
+                    waveform_latent, skip_connections
+                )
+
+            # Convert tensor to PIL Image
+            reconstructed_image_tensor = (
+                reconstructed_image_tensor.squeeze(0).cpu().clamp(0, 1)
+            )
+            image_pil = Image.fromarray(
+                (reconstructed_image_tensor.permute(1, 2, 0).numpy() * 255).astype(
+                    "uint8"
+                )
             )
 
-            reconstructed_image = reconstruct_image_from_waveform_latents(
-                waveform_latent
-            )
-
-            # Convert to base64 to send back to client
-            image_pil = transforms.ToPILImage()(reconstructed_image.squeeze().cpu())
+            # Encode image to base64 PNG
             buf = BytesIO()
             image_pil.save(buf, format="PNG")
             image_base64 = base64.b64encode(buf.getvalue()).decode("utf-8")
 
-            # Respond to simulation client
+            # Send back response
             await websocket.send_json(
                 {
                     "status": "success",
-                }
-            )
-
-            # forward to frontend if available (place in Redis Cache)
-            redis_key = f"reconstructed:{settings.THOUGHT_TO_IMAGE_REDIS_KEY}"
-            redis_value = json.dumps(
-                {
-                    "type": "reconstructed_image",
-                    "session_id": request.get("session_id", "anonymous"),
                     "image_base64": f"data:image/png;base64,{image_base64}",
+                    "metadata": request.get("metadata", {}),
                 }
             )
-            await redis_client.set(redis_key, redis_value, ex=600)
-            metrics.visual_thoughts_rendered.inc()
 
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected.")
-    except Exception:
-        logger.exception("WebSocket error in image reconstruction:")
-        metrics.websocket_errors.inc()
+    except Exception as e:
+        logger.exception(f"Reconstruction error: {e}")
+        await websocket.send_json({"status": "error", "message": str(e)})
+        await websocket.close()
 
 
 @router.websocket("/ws/test")

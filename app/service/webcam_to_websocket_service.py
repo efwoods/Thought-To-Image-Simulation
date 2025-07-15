@@ -9,6 +9,17 @@ from core.config import settings
 
 
 # -----------------------------
+# Convert PIL Image Path → Base64
+# -----------------------------
+def encode_image_to_base64(path):
+    image = Image.open(path)
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    base64_img = base64.b64encode(buffer.getvalue()).decode("utf-8")
+    return f"data:image/png;base64,{base64_img}"
+
+
+# -----------------------------
 # Convert PIL Image → Base64
 # -----------------------------
 def pil_image_to_base64(image: Image.Image) -> str:
