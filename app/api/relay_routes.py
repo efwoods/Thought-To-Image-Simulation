@@ -64,9 +64,7 @@ async def reconstruct(websocket: WebSocket):
             synthetic_waveform = decode_and_decompress_tensor(
                 payload["synthetic_waveform"]
             )
-            skip_connections = decompress_skip_connections(
-                payload["encoded_compressed_skip_connections"]
-            )
+            skip_connections = decompress_skip_connections(payload["skip_connections"])
 
             # Optional: if skip_connections is a list of tensors (like from UNet), handle as list
             if (
