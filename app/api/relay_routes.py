@@ -51,11 +51,17 @@ async def frontend_websocket(websocket: WebSocket, user_id: str):
 @router.websocket("/ws/reconstruct-image-from-waveform-latent")
 async def reconstruct(websocket: WebSocket):
     await websocket_manager.connect_reconstruction(websocket)
+    logger.info(
+        "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX reconstruct-image-from-waveform-latent connected"
+    )
     try:
         while True:
             message = await websocket.receive_text()
             request = json.loads(message)
             payload = request["payload"]
+            logger.info(
+                "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX reconstruct-image-from-waveform-latent: payload received"
+            )
 
             # Get user_id from request
             user_id = request["metadata"]["user_id"]
@@ -89,7 +95,9 @@ async def reconstruct(websocket: WebSocket):
                     "uint8"
                 )
             )
-
+            logger.info(
+                "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX reconstruct-image-from-waveform-latent: image has been reconstructed"
+            )
             # Encode image to base64 PNG
             buf = BytesIO()
             image_pil.save(buf, format="PNG")
@@ -117,7 +125,9 @@ async def reconstruct(websocket: WebSocket):
                 success = await websocket_manager.send_to_frontend(
                     user_id, message_data
                 )
-
+                logger.info(
+                    "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX reconstruct-image-from-waveform-latent: messsage has been sent to the frontend"
+                )
                 # Send acknowledgment back to the reconstruction service
                 await websocket.send_json(
                     {
