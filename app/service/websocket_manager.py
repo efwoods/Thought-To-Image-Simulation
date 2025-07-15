@@ -16,7 +16,7 @@ class WebSocketManager:
     async def connect_frontend(self, websocket: WebSocket, user_id: str):
         await websocket.accept()
         self.frontend_connections[user_id] = websocket
-        logger.info(f"Frontend WebSocket connected for user: {user_id}")
+        logger.info(f"Frontend WebSocket connected for user: {json.dumps(user_id)}")
 
     def disconnect_frontend(self, user_id: str):
         if user_id in self.frontend_connections:
