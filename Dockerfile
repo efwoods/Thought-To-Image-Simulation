@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./requirements.txt
+
 RUN pip install --upgrade pip \
  && pip install --prefix=/install_deps --no-cache-dir -r requirements.txt \
  && find /install_deps -type d -name "tests" -exec rm -rf {} + \
@@ -18,10 +19,18 @@ RUN pip install --upgrade pip \
 FROM python:3.11-slim-bullseye AS runtime
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y ffmpeg && apt-get clean && rm -rf /var/lib/apt/lists/*
+# Install system-level dependencies for TorchInductor
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    build-essential \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Copy installed Python packages from builder
 COPY --from=builder /install_deps /usr/local/
+
+# Copy application code and config
 COPY app/ ./
 COPY .env ./ 
 
+# Run FastAPI app with Uvicorn
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
