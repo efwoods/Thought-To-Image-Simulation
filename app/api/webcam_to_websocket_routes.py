@@ -71,8 +71,6 @@ async def process_thought_to_image(payload: SimulationRequest):
     with open(TEST_INDICES, "rb") as f:
         sample_stimulus_image_test_indices_list = pickle.load(f)
 
-    logger.info()
-
     processing_image_path = sample_stimulus_image_path_list[
         sample_stimulus_image_test_indices_list["indices"][
             process_thought_to_image_index
