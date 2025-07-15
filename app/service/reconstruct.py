@@ -35,8 +35,22 @@ def reconstruct_image_from_waveform_latents(waveform_latent, skip_connections=No
     return reconstructed_image
 
 
-def decode_and_decompress_tensor(encoded_str: str) -> torch.Tensor:
-    compressed = base64.b64decode(encoded_str)
+def decode_and_decompress_tensor(encoded_str_base64: str) -> torch.Tensor:
+    compressed = base64.b64decode(encoded_str_base64)
     json_bytes = zlib.decompress(compressed)
     tensor_data = json.loads(json_bytes.decode("utf-8"))
     return torch.tensor(tensor_data, dtype=torch.float32, device=settings.DEVICE)
+
+
+def decompress_skip_connections(encoded_skip_connections_base64):
+    # Decode from base64 string
+    compressed = base64.b64decode(encoded_skip_connections_base64.encode("utf-8"))
+    # Decompress with zlib
+    skip_json = zlib.decompress(compressed).decode("utf-8")
+    # Parse JSON string back to nested lists
+    skip_data = json.loads(skip_json)
+    # Convert nested lists back to tensors
+    skip_connections = [
+        torch.tensor(skip_connection_data) for skip_connection_data in skip_data
+    ]
+    return skip_connections

@@ -42,8 +42,14 @@ from service.webcam_to_websocket_service import (
 )
 import pickle
 
-IMAGE_PATHS_FLAT_LIST = "../data/image_paths_dict_flat_list.pkl"
-TEST_INDICES = test_dataset_dir = "../data/test_dataset_metadata.pkl"
+import os
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+IMAGE_PATHS_FLAT_LIST = os.path.join(BASE_DIR, "data", "image_paths_dict_flat_list.pkl")
+TEST_INDICES = os.path.join(BASE_DIR, "data", "test_dataset_metadata.pkl")
+
+# IMAGE_PATHS_FLAT_LIST = "../data/image_paths_dict_flat_list.pkl"
+# TEST_INDICES = test_dataset_dir = "../data/test_dataset_metadata.pkl"
 
 simulation_image_index_test_full_pipeline = 0
 process_thought_to_image_index = 0

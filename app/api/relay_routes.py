@@ -16,32 +16,57 @@ from core.config import settings
 from core.monitoring import metrics
 from core.logging import logger
 import asyncio
+from PIL import Image
+import datetime
 
 from redis.asyncio import Redis  # requires `redis>=4.2.0`
-
 
 from service.reconstruct import (
     preprocess_image_from_websocket,
     reconstruct_image_from_waveform_latents,
     decode_and_decompress_tensor,
+    decompress_skip_connections,
 )
 
 router = APIRouter()
 
+# api/relay_routes.py
+from service.websocket_manager import websocket_manager
+
+
+@router.websocket("/ws/frontend/{user_id}")
+async def frontend_websocket(websocket: WebSocket, user_id: str):
+    await websocket_manager.connect_frontend(websocket, user_id)
+    try:
+        while True:
+            # Keep connection alive and handle any frontend messages
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        websocket_manager.disconnect_frontend(user_id)
+    except Exception as e:
+        logger.exception(f"Frontend WebSocket error: {e}")
+        websocket_manager.disconnect_frontend(user_id)
+
 
 @router.websocket("/ws/reconstruct-image-from-waveform-latent")
 async def reconstruct(websocket: WebSocket):
-    await websocket.accept()
-    logger.info("Image reconstruction WebSocket connected.")
-
+    await websocket_manager.connect_reconstruction(websocket)
     try:
         while True:
             message = await websocket.receive_text()
             request = json.loads(message)
             payload = request["payload"]
 
+            # Get user_id from request
+            user_id = request["metadata"]["user_id"]
+
             waveform_latent = decode_and_decompress_tensor(payload["waveform_latent"])
-            skip_connections = decode_and_decompress_tensor(payload["skip_connections"])
+            synthetic_waveform = decode_and_decompress_tensor(
+                payload["synthetic_waveform"]
+            )
+            skip_connections = decompress_skip_connections(
+                payload["encoded_compressed_skip_connections"]
+            )
 
             # Optional: if skip_connections is a list of tensors (like from UNet), handle as list
             if (
@@ -53,10 +78,9 @@ async def reconstruct(websocket: WebSocket):
                 ]
 
             # Reconstruct the image using decoder
-            with torch.no_grad():
-                reconstructed_image_tensor = image_decoder(
-                    waveform_latent, skip_connections
-                )
+            reconstructed_image_tensor = reconstruct_image_from_waveform_latents(
+                waveform_latent, skip_connections
+            )
 
             # Convert tensor to PIL Image
             reconstructed_image_tensor = (
@@ -73,20 +97,49 @@ async def reconstruct(websocket: WebSocket):
             image_pil.save(buf, format="PNG")
             image_base64 = base64.b64encode(buf.getvalue()).decode("utf-8")
 
-            # Send back response
-            await websocket.send_json(
-                {
+            previous_metadata = request["metadata"]
+            timestamp = datetime.datetime.utcnow().isoformat() + "Z"
+            metadata = {
+                **previous_metadata,
+                "type": "reconstructed_image",
+                "timestamp": timestamp,
+                "origin": "reconstruct-image-from-waveform-latent",
+            }
+
+            # Send to frontend
+            if user_id:
+                message_data = {
+                    "type": "reconstructed_image",
                     "status": "success",
-                    "image_base64": f"data:image/png;base64,{image_base64}",
-                    "metadata": request.get("metadata", {}),
+                    "metadata": metadata,
+                    "image_data": image_base64,
+                    "image_format": "png",
                 }
-            )
+
+                success = await websocket_manager.send_to_frontend(
+                    user_id, message_data
+                )
+
+                # Send acknowledgment back to the reconstruction service
+                await websocket.send_json(
+                    {
+                        "status": "success" if success else "partial_success",
+                        "message": "Image reconstructed"
+                        + (" and forwarded" if success else " but failed to forward"),
+                        "metadata": metadata,
+                    }
+                )
+            else:
+                await websocket.send_json(
+                    {"status": "error", "message": "No user_id provided for forwarding"}
+                )
 
     except WebSocketDisconnect:
-        logger.info("WebSocket disconnected.")
+        websocket_manager.disconnect_reconstruction(websocket)
     except Exception as e:
         logger.exception(f"Reconstruction error: {e}")
         await websocket.send_json({"status": "error", "message": str(e)})
+        websocket_manager.disconnect_reconstruction(websocket)
         await websocket.close()
 
 
